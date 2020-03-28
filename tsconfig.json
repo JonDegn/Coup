@@ -10,7 +10,8 @@
     "noImplicitAny": false,
     "experimentalDecorators": true,
     "sourceMap": false,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "moduleResolution": "node",
   },
   "include": [
     "**/*.ts"

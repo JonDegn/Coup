@@ -1,65 +1,87 @@
 import { Room, Client } from "colyseus";
 import { Schema, MapSchema, type } from "@colyseus/schema";
 
-// An abstract player object, demonstrating a potential 2D world position
+
 export class Player extends Schema {
   @type("string")
-  name:string
+  name: string
 
-  constructor(name:string){
+  @type("boolean")
+  ready: boolean = false
+
+  @type("boolean")
+  connected: boolean = true
+
+  constructor(name: string) {
     super()
     this.name = name;
   }
 }
 
-// Our custom game state, an ArraySchema of type Player only at the moment
 export class State extends Schema {
   @type({ map: Player })
   players = new MapSchema<Player>();
 
-  something = "This attribute won't be sent to the client-side";
+  @type("string")
+  roomName: boolean = true
 
-  createPlayer (name: string, id: string) {
-      this.players[ id ] = new Player(name);
+  @type("boolean")
+  inLobby: boolean = true
+
+  createPlayer(id: string, name: string) {
+    this.players[id] = new Player(name)
   }
 
-  removePlayer (id: string) {
-      delete this.players[ id ];
+  removePlayer(id: string) {
+    delete this.players[id]
   }
 
-  list() {
-    return ['bob','joe','sally']
+  toggleReady(id: string) {
+    this.players[id].ready = !this.players[id].ready
   }
 }
 
-export class GameRoom extends Room<State> {
+export class Lobby extends Room<State> {
   // Colyseus will invoke when creating the room instance
   onCreate(options: any) {
-    console.log("lobby created")
-    // initialize empty room state
-    this.setState(new State());
+    this.setMetadata({roomName: options.roomName})
+    console.log("lobby created", options)
+    this.setState(new State())
+    this.state.roomName = options.roomName
   }
 
   // Called every time a client joins
   onJoin(client: Client, options: any) {
     console.log(`${options.name} joined`)
-    this.state.createPlayer(options.name, client.sessionId)
-    // this.state.players[client.sessionId] = new Player();
-    console.log(this.state)
+    this.state.createPlayer(client.sessionId, options.name)
+  }
+
+  async onLeave(client: Client, consented: boolean) {
+    this.state.players[client.sessionId].connected = false
+    console.log(`${this.state.players[client.sessionId].name} disconnected`)
+    try {
+      if (consented) throw new Error()
+      await this.allowReconnection(client, 30)
+      console.log(`${this.state.players[client.sessionId].name} reconnected`)
+      this.state.players[client.sessionId].connected = true
+    } catch (e) {
+      console.log(`${this.state.players[client.sessionId].name} removed from state`)
+      this.state.removePlayer(client.sessionId)
+    }
+
+    // this.state.removePlayer(client.sessionId)
   }
 
   // Called every time this room receives a message
   onMessage(client: Client, message: any) {
-    console.log("message:", message, "client:", client)
-    // Retrieve a previously stored player by their sessionId
-    // const player = this.state.players[client.sessionId];
-    // // Pretend that we sent the room the message: {command: "left"}
-    // if (message.command === "left") {
-    //   player.x -= 1;
-    // } else if (message.command === "right") {
-    //   player.x += 1;
-    // }
+    console.log("message:", message)
 
-    // console.log(client.sessionId + " at, x: " + player.x, "y: " + player.y);
+    if (message.command === "toggleReady") {
+      this.state.toggleReady(client.sessionId)
+    } else if (message.command === "startGame") {
+      this.state.inLobby = false
+    } else if (message.command === "renamePlayer") {
+      this.state.players[client.sessionId].name = message.name
+    }
   }
 }
