@@ -1,5 +1,5 @@
 import { Room, Client } from "colyseus";
-import { Schema, MapSchema, type } from "@colyseus/schema";
+import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
 
 
 export class Player extends Schema {
@@ -12,9 +12,21 @@ export class Player extends Schema {
   @type("boolean")
   connected: boolean = true
 
+  @type("number")
+  coins: number = 2
+
+  @type("boolean")
+  outOfGame: boolean = false
+
+  @type(["string"])
+  hand: ArraySchema<string> = new ArraySchema<string>()
+
   constructor(name: string) {
     super()
     this.name = name;
+    const cards = ['card','ambassador','assassin','captain','contessa','duke']
+    this.hand.push(cards[Math.floor(Math.random() * cards.length)])
+    this.hand.push(cards[Math.floor(Math.random() * cards.length)])
   }
 }
 
@@ -27,6 +39,12 @@ export class State extends Schema {
 
   @type("boolean")
   inLobby: boolean = true
+
+  @type(["string"])
+  turnOrder: ArraySchema<string>
+
+  @type("number")
+  currentTurn: number = 0
 
   createPlayer(id: string, name: string) {
     this.players[id] = new Player(name)
@@ -44,7 +62,7 @@ export class State extends Schema {
 export class Lobby extends Room<State> {
   // Colyseus will invoke when creating the room instance
   onCreate(options: any) {
-    this.setMetadata({roomName: options.roomName})
+    this.setMetadata({ roomName: options.roomName })
     console.log("lobby created", options)
     this.setState(new State())
     this.state.roomName = options.roomName
@@ -66,7 +84,9 @@ export class Lobby extends Room<State> {
       this.state.players[client.sessionId].connected = true
     } catch (e) {
       console.log(`${this.state.players[client.sessionId].name} removed from state`)
-      this.state.removePlayer(client.sessionId)
+      // todo: Player forfeits
+      this.state.players[client.sessionId].outOfGame = true
+      // this.state.removePlayer(client.sessionId)
     }
 
     // this.state.removePlayer(client.sessionId)
@@ -79,9 +99,14 @@ export class Lobby extends Room<State> {
     if (message.command === "toggleReady") {
       this.state.toggleReady(client.sessionId)
     } else if (message.command === "startGame") {
+      this.state.turnOrder = new ArraySchema<string>(...Object.keys(this.state.players).sort())
       this.state.inLobby = false
     } else if (message.command === "renamePlayer") {
       this.state.players[client.sessionId].name = message.name
+    } else if (message.command === "endTurn") {
+      do {
+        this.state.currentTurn = (this.state.currentTurn + 1) % this.state.turnOrder.length
+      } while (this.state.players[this.state.turnOrder[this.state.currentTurn]].outOfGame)
     }
   }
 }
