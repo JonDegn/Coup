@@ -1,4 +1,4 @@
-import { Room, Client } from "colyseus";
+import { Room, Client, Delayed } from "colyseus";
 import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
 
 
@@ -24,7 +24,7 @@ export class Player extends Schema {
   constructor(name: string) {
     super()
     this.name = name;
-    const cards = ['card','ambassador','assassin','captain','contessa','duke']
+    const cards = ['back', 'ambassador', 'assassin', 'captain', 'contessa', 'duke']
     this.hand.push(cards[Math.floor(Math.random() * cards.length)])
     this.hand.push(cards[Math.floor(Math.random() * cards.length)])
   }
@@ -46,6 +46,9 @@ export class State extends Schema {
   @type("number")
   currentTurn: number = 0
 
+  @type("number")
+  countdownTimer: number = 0
+
   createPlayer(id: string, name: string) {
     this.players[id] = new Player(name)
   }
@@ -60,12 +63,16 @@ export class State extends Schema {
 }
 
 export class Lobby extends Room<State> {
+
+  timerInterval: Delayed
+
   // Colyseus will invoke when creating the room instance
   onCreate(options: any) {
     this.setMetadata({ roomName: options.roomName })
     console.log("lobby created", options)
     this.setState(new State())
     this.state.roomName = options.roomName
+    this.clock.start()
   }
 
   // Called every time a client joins
@@ -83,7 +90,7 @@ export class Lobby extends Room<State> {
       console.log(`${this.state.players[client.sessionId].name} reconnected`)
       this.state.players[client.sessionId].connected = true
     } catch (e) {
-      console.log(`${this.state.players[client.sessionId].name} removed from state`)
+      console.log(`${this.state.players[client.sessionId].name} forfeits`)
       // todo: Player forfeits
       this.state.players[client.sessionId].outOfGame = true
       // this.state.removePlayer(client.sessionId)
@@ -98,9 +105,13 @@ export class Lobby extends Room<State> {
 
     if (message.command === "toggleReady") {
       this.state.toggleReady(client.sessionId)
+      if (this.state.players[client.sessionId].ready === false) this.cancelTimer()
     } else if (message.command === "startGame") {
-      this.state.turnOrder = new ArraySchema<string>(...Object.keys(this.state.players).sort())
-      this.state.inLobby = false
+      if (this.timerInterval && this.timerInterval.active) return
+      this.startTimer(5, () => {
+        this.state.turnOrder = new ArraySchema<string>(...Object.keys(this.state.players).sort())
+        this.state.inLobby = false
+      })
     } else if (message.command === "renamePlayer") {
       this.state.players[client.sessionId].name = message.name
     } else if (message.command === "endTurn") {
@@ -108,5 +119,25 @@ export class Lobby extends Room<State> {
         this.state.currentTurn = (this.state.currentTurn + 1) % this.state.turnOrder.length
       } while (this.state.players[this.state.turnOrder[this.state.currentTurn]].outOfGame)
     }
+  }
+
+  startTimer(length: number, callback: Function) {
+    this.state.countdownTimer = length
+    this.timerInterval = this.clock.setInterval(() => {
+      console.log("Timer: ", this.state.countdownTimer)
+      this.state.countdownTimer--
+      if (this.state.countdownTimer == 0) {
+        callback()
+        this.cancelTimer()
+      }
+    }, 1000)
+  }
+
+  cancelTimer() {
+    if (this.timerInterval) {
+      this.timerInterval.clear();
+      console.log("timer cancelled")
+    }
+    this.state.countdownTimer = 0
   }
 }
