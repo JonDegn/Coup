@@ -11,6 +11,7 @@ export enum Character {
 }
 
 export enum ActionType {
+    Coup,
     Income,
     ForeignAid,
     Tax,
@@ -21,36 +22,17 @@ export enum ActionType {
     Challenge
 }
 
-// export enum CounterAction {
-//     BlockForeignAid,
-//     BlockSteal,
-//     BlockAssassination
-// }
-
-export class CounterAction {
-    blockingPlayerId: string
-    blockingCharacter: Character
-    bluff: boolean = false
-    challengingPlayerId: string
-
-    constructor(blockingPlayerId: string, blockingCharacter: Character, bluff: boolean) {
-        this.blockingPlayerId = blockingPlayerId
-        this.blockingCharacter = blockingCharacter
-        this.bluff = bluff
-    }
-}
-
-export class CurrentAction {
+export class Action {
     sourcePlayerId: string
     targetPlayerId: string
     action: ActionType
-    execute: () => void
+    execute: () => ActionResolution
     asCharacter: Character
     blocked: boolean = false
     bluff: boolean = false
     challengingPlayerId: string
 
-    constructor(action: ActionType, sourcePlayerId: string, targetPlayerId: string, callback: () => void, asCharacter?: Character, bluff?: boolean) {
+    constructor(action: ActionType, sourcePlayerId: string, targetPlayerId: string, callback: () => ActionResolution, asCharacter?: Character, bluff?: boolean) {
         this.action = action
         this.sourcePlayerId = sourcePlayerId
         this.targetPlayerId = targetPlayerId
@@ -69,6 +51,13 @@ export class ActionResponse {
         this.charactersThatCanBlock = charactersThatCanBlock
         this.canChallenge = canChallenge
     }
+}
+
+export class ActionResolution {
+    playerToLoseInfluence: string
+    playerToExchange: string
+    characterToExchange: Character
+    cardsToReturn: number
 }
 
 export class Hand {
@@ -93,11 +82,52 @@ export class PlayerData {
     name: string
     hand: Hand
     coins: number = 2
+    outOfGame: boolean = false
 
     constructor(id: string, name: string, hand: Hand) {
         this.id = id
         this.name = name
         this.hand = hand
+    }
+
+    addToHand(character: Character) {
+        this.hand.cards.push(character)
+        this.hand.lostInfluence.push(false)
+    }
+
+    removeFromHand(character: Character) {
+        if (!this.hand.contains(character)) {
+            console.error(`${this.name} tried to remove ${character}, but doesn't have it in their hand!`)
+        }
+
+        let idxToRemove = -1
+        for (let i = 0; i < this.hand.cards.length; i++) {
+            if (!this.hand.lostInfluence[i] && this.hand.cards[i] === character) {
+                idxToRemove = i
+                break
+            }
+        }
+
+        this.hand.lostInfluence.splice(idxToRemove, 1)
+        this.hand.cards.splice(idxToRemove, 1)
+    }
+
+    loseInfluence(character: Character) {
+        if (!this.hand.contains(character)) {
+            console.error(`${this.name} tried to remove ${character}, but doesn't have it in their hand!`)
+        }
+
+        let idxToLose = -1
+        for (let i = 0; i < this.hand.cards.length; i++) {
+            if (!this.hand.lostInfluence[i] && this.hand.cards[i] === character) {
+                idxToLose = i
+                break
+            }
+        }
+        this.hand.lostInfluence[idxToLose] = true;
+        if(this.hand.lostInfluence[0] && this.hand.lostInfluence[1]) {
+            this.outOfGame = true
+        }
     }
 }
 
@@ -139,9 +169,7 @@ export class Coup {
     deck: Deck
     currentTurn: number = 0
     turnOrder: string[] = []
-    // currentAction: CurrentAction = null
-    // counterAction: CounterAction = null
-    actionStack: CurrentAction[] = []
+    actionStack: Action[] = []
 
     constructor(players) {
         const playerIds = Object.keys(players)
@@ -167,63 +195,99 @@ export class Coup {
         return this.players[playerId].hand.contains(character)
     }
 
+    playersStillPlaying() {
+        return Object.keys(this.players).filter(pId => !this.players[pId].outOfGame)
+    }
+
     addAction(action: ActionType, sourcePlayerId: string, targetPlayerId?: string, asCharacter?: Character): ActionResponse {
-        if (action === ActionType.Income) {
-            this.actionStack.push(new CurrentAction(action, sourcePlayerId, targetPlayerId, () => this.currentPlayer().coins++))
+
+        if (action === ActionType.Coup) {
+            this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
+                this.players[sourcePlayerId].coins -= 7
+                return { playerToLoseInfluence: targetPlayerId, playerToExchange: null, characterToExchange: null, cardsToReturn: 0 }
+            }))
+            return new ActionResponse([], [], false)
+        } else if (action === ActionType.Income) {
+            this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
+                this.currentPlayer().coins++
+                return new ActionResolution()
+            }))
             return new ActionResponse([], [], false)
         } else if (action === ActionType.ForeignAid) {
-            this.actionStack.push(new CurrentAction(action, sourcePlayerId, targetPlayerId, () => this.currentPlayer().coins += 2))
-            return new ActionResponse(Object.keys(this.players).filter(pId => pId != this.currentPlayer().id), [Character.Duke], false) // todo: should only be players still in game
+            this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
+                this.currentPlayer().coins += 2
+                return new ActionResolution()
+            }))
+            return new ActionResponse(this.playersStillPlaying().filter(pId => pId != this.currentPlayer().id), [Character.Duke], false) 
         } else if (action === ActionType.Block) {
-            this.actionStack.push(new CurrentAction(action, sourcePlayerId, targetPlayerId, () => {
+            this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
                 console.log(`${this.players[sourcePlayerId].name} blocked ${this.currentPlayer().name}`)
                 this.actionStack.pop()
+                return new ActionResolution()
             }, asCharacter, !this.playerHandContains(sourcePlayerId, asCharacter)))
+            return new ActionResponse([], [], true)
+        } else if (action === ActionType.Challenge) {
+            this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
+                const challengedAction = this.actionStack[this.actionStack.length - 1]
+                if (challengedAction.bluff) {
+                    this.actionStack.pop()  //remove action
+                    return { playerToLoseInfluence: challengedAction.sourcePlayerId, playerToExchange: null, characterToExchange: null, cardsToReturn: 0 }
+                } else {
+                    return { playerToLoseInfluence: sourcePlayerId, playerToExchange: challengedAction.sourcePlayerId, characterToExchange: challengedAction.asCharacter, cardsToReturn: 0 }
+                }
+            }))
+            return new ActionResponse([], [], false)
+        } else if (action === ActionType.Tax) {
+            this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
+                this.currentPlayer().coins += 3
+                return new ActionResolution()
+            }, asCharacter, !this.playerHandContains(sourcePlayerId, Character.Duke)))
+            return new ActionResponse([], [], true)
+        } else if (action === ActionType.Steal) {
+            this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
+                const targetPlayer = this.players[targetPlayerId]
+                const amountStolen = Math.min(targetPlayer.coins, 2)
+                targetPlayer.coins -= amountStolen
+                this.players[sourcePlayerId].coins += amountStolen
+                return new ActionResolution()
+            }, asCharacter, !this.playerHandContains(sourcePlayerId, Character.Captain)))
+            return new ActionResponse([targetPlayerId], [Character.Captain, Character.Ambassador], true)
+        } else if (action === ActionType.Assassinate) {
+            this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
+                this.players[sourcePlayerId].coins -= 3
+                return { playerToLoseInfluence: targetPlayerId, playerToExchange: null, characterToExchange: null, cardsToReturn: 0 }
+            }, asCharacter, !this.playerHandContains(sourcePlayerId, Character.Assassin)))
+            return new ActionResponse([targetPlayerId], [Character.Contessa], true)
+        } else if (action === ActionType.Exchange) {
+            this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
+                this.players[sourcePlayerId].addToHand(this.deck.drawCard())
+                this.players[sourcePlayerId].addToHand(this.deck.drawCard())
+                return { playerToLoseInfluence: null, playerToExchange: null, characterToExchange: null, cardsToReturn: 2 }
+            }, asCharacter, !this.playerHandContains(sourcePlayerId, Character.Ambassador)))
             return new ActionResponse([], [], true)
         }
         return new ActionResponse([], [], false)
     }
 
-    resolveAction() {
+    resolveAction(): ActionResolution {
         const action = this.actionStack.pop()
-        action.execute()
+        return action.execute()
     }
 
-    // startAction(action: ActionType, targetPlayerId?: string) {
-    //     console.log(`${this.currentPlayer().name} is doing action ${action}, targeting ${targetPlayerId ? this.players[targetPlayerId].name : "no one"}`)
+    exchangeCard(pId: string, character: Character, replaceFirst: boolean, noDraw?: boolean) {
+        const player: PlayerData = this.players[pId]
+        if (replaceFirst) {
+            player.removeFromHand(character)
+            this.deck.replaceAndShuffle(character)
+            if (!noDraw) player.addToHand(this.deck.drawCard())
+        } else {
+            player.removeFromHand(character)
+            if (!noDraw) player.addToHand(this.deck.drawCard())
+            this.deck.replaceAndShuffle(character)
+        }
+    }
 
-    //     if (action === ActionType.Income) {
-    //         this.currentAction = new CurrentAction(action, targetPlayerId, () => this.currentPlayer().coins++, [], false)
-    //     } else if (action === ActionType.ForeignAid) {
-    //         this.currentAction = new CurrentAction(action, targetPlayerId, () => this.currentPlayer().coins += 2, [Character.Duke], false)
-    //     }
-    // }
-
-    // challengeAction(challengingPlayerId: string) {
-    //     console.log(`${this.players[challengingPlayerId].name} challenges ${this.currentPlayer().name}`)
-    //     this.currentAction.challengingPlayerId = true
-    // }
-
-    // challengeCounterAction(challengingPlayerId: string) {
-    //     console.log(`${this.players[challengingPlayerId].name} challenges ${this.currentPlayer().name}`)
-    //     this.counterAction.challengingPlayerId = true
-    // }
-
-    // blockAction(blockingPlayerId: string, character: Character) {
-    //     this.counterAction = new CounterAction(blockingPlayerId, character, false)
-    // }
-
-    // resolveAction() {
-    //     if (this.counterAction) {
-    //         if(this.counterAction.challengingPlayerId) {
-    //             if(this.counterAction.bluff) {
-    //                 // 
-    //                 //this.players[this.counterAction.blockingPlayerId]
-    //             }
-    //         }
-    //     }
-
-    //     this.currentAction.execute()
-    //     this.currentAction = null;
-    // }
+    loseInfluence(pId: string, character: Character) {
+        this.players[pId].loseInfluence(character)
+    }
 }
