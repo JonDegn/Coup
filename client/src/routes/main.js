@@ -15,6 +15,9 @@ function Main(props) {
     const [turnOrder, setTurnOrder] = useState([])
     const [playerId, setPlayerId] = useState('')
     const [countdownTimer, setCountdownTimer] = useState(0)
+    const [availableActions, setAvailableActions] = useState([])
+    const [selectingActionTarget, setSelectingActionTarget] = useState(null)
+    const [currentAction, setCurrentAction] = useState(null)
 
     function connect(r) {
         console.log(r)
@@ -28,6 +31,10 @@ function Main(props) {
             setCurrentTurn(s.currentTurn)
             setTurnOrder(s.turnOrder)
             setCountdownTimer(s.countdownTimer)
+            setAvailableActions(s.availableActions)
+            setCurrentAction(s.currentAction)
+            // setAvailableActions([])
+            // console.log("actions",s.availableActions)
         })
         localStorage.setItem("roomId", r.id);
         localStorage.setItem("sessionId", r.sessionId);
@@ -51,7 +58,7 @@ function Main(props) {
     }, [Colyseus])
 
     function joinRoom() {
-        client.getAvailableRooms('lobby').then(rooms => {
+        client.getAvailableRooms('in-game').then(rooms => {
             const matches = rooms.filter(r => r.metadata && r.metadata.roomName === roomName)
             if (matches.length > 0) {
                 console.log(matches)
@@ -65,13 +72,18 @@ function Main(props) {
     }
 
     function createRoom() {
-        client.create('lobby', { name, roomName }).then(r => {
+        client.create('in-game', { name, roomName }).then(r => {
             connect(r)
         })
     }
 
     function startGame() {
         room.send({ command: "startGame" })
+    }
+
+    function selectTargetForAction(pId) {
+        room.send({ command: "action", action: selectingActionTarget, targetPlayerId: pId })
+        setSelectingActionTarget(null)
     }
 
     return (
@@ -110,31 +122,56 @@ function Main(props) {
                                 )
                             })}
                         </Stage> */}
-                        <table>
-                            <tr><td>Current Turn</td><td>Player</td><td>Coins</td><td>Lost Influence</td></tr>
-                            {turnOrder.map((pId, pNum) => {
-                                const p = players[pId]
-                                return (
-                                    <tr>
-                                        <td>{pNum === currentTurn ? 'X' : ''}</td>
-                                        <td>{`${p.name} ${p.connected ? '' : ' (disconnected)'}`}</td>
-                                        <td>{p.coins}</td>
-                                        <td>cards here</td>
-                                    </tr>
-                                )
-                            })}
+                        {selectingActionTarget && <h2>Select a player:</h2>}
+                        {currentAction && currentAction.sourcePlayer !== playerId &&
+                            <div>
+                                <h2>{players[currentAction.sourcePlayer].name} is targetting {players[currentAction.targetPlayer].name}</h2>
+                                {currentAction.canChallenge && <button>Challenge!</button>}
+                                {currentAction.playersThatCanBlock.filter(pId => pId === playerId).length ? 
+                                currentAction.charactersThatCanBlock.map(c => <button>Block as {c}</button>)
+                                :null}
+                            </div>}
+                        <table border={1} style={{ borderCollapse: 'collapse' }}>
+                            <thead>
+                                <tr><td>Current Turn</td><td>Player</td><td>Coins</td><td>Lost Influence</td></tr>
+                            </thead>
+                            <tbody>
+                                {turnOrder.map((pId, pNum) => {
+                                    const p = players[pId]
+                                    return (
+                                        <tr key={pId}>
+                                            <td>{pNum === currentTurn ? 'X' : ''}</td>
+                                            <td onClick={() => {
+                                                if (selectingActionTarget && pId != playerId) {
+                                                    selectTargetForAction(pId)
+                                                }
+                                            }}>{`${p.name} ${p.connected ? '' : ' (disconnected)'}`}</td>
+                                            <td>{p.coins}</td>
+                                            <td>{p.revealedHand.join()}</td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
                         </table>
                         <h2>Actions:</h2>
-                        <button onClick={() => room.send({ command: "action", action: "income" })}>Income +1</button>
-                        <button onClick={() => room.send({ command: "action", action: "foreignAid" })}>Foreign Aid +2</button>
-                        <button onClick={() => room.send({ command: "action", action: "tax" })}>Tax +3</button>
-                        <button onClick={() => room.send({ command: "action", action: "steal", target: "" })}>Steal +2</button>
-                        <button onClick={() => room.send({ command: "action", action: "assassinate", target: "" })}>Assassinate</button>
-                        <button onClick={() => room.send({ command: "action", action: "exchange" })}>Exchange</button>
-                        <h2>Counter-actions:</h2>
+                        <>
+                            {
+                                playerId === turnOrder[currentTurn] &&
+                                availableActions.map(a =>
+                                    <button key={a.actionType} onClick={() => {
+                                        if (a.targetsPlayer) {  // Wait for player to select a target
+                                            setSelectingActionTarget(a.actionType)
+                                        } else {
+                                            room.send({ command: "action", action: a.actionType })
+                                        }
+                                    }}>{a.label}</button>
+                                )
+                            }
+                        </>
+                        {/* <h2>Counter-actions:</h2>
                         <button onClick={() => room.send({ command: "counterAction", action: "steal" })}>Block Stealing</button>
                         <button onClick={() => room.send({ command: "counterAction", action: "foreignAid" })}>Block Foreign Aid</button>
-                        <button onClick={() => room.send({ command: "counterAction", action: "assassinate" })}>Block Assassination</button>
+                        <button onClick={() => room.send({ command: "counterAction", action: "assassinate" })}>Block Assassination</button>*/}
                         <button onClick={() => room.send({ command: "endTurn" })}>end turn (temp)</button>
                     </>
                 :

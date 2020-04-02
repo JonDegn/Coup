@@ -1,7 +1,7 @@
 // Colyseus + Express
 import { Server } from "colyseus";
 import { createServer } from "http";
-import { Lobby } from "./rooms/lobby";
+import { InGame } from "./rooms/ingame";
 import express from 'express';
 const port = Number(process.env.port) || 3001;
 
@@ -16,7 +16,7 @@ const gameServer = new Server({
 gameServer.listen(port);
 console.log("server started")
 
-gameServer.define("lobby", Lobby)
+gameServer.define("in-game", InGame)
 
 // // view engine setup
 // app.set('views', path.join(__dirname, 'views'));

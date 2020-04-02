@@ -1,4 +1,4 @@
-import { Coup, Deck, Character, PlayerData, Hand, ActionType, CurrentAction } from "./coup"
+import { Coup, Deck, Character, PlayerData, Hand, ActionType, Action } from "./coup"
 
 describe('Exchanging a card', () => {
     it('does not get the same card when not replacing first', () => {
@@ -190,6 +190,7 @@ describe('On creation', () => {
         }
         const coup = new Coup(expectedPlayers)
         expect(coup.turnOrder).toEqual(["id1", "id2"])
+        expect(coup.currentTurn).toEqual(0)
     })
 })
 
@@ -238,6 +239,116 @@ describe('When performing action: Income', () => {
         coup.resolveAction()
         expect(coup.players.id1.coins).toEqual(3)
         expect(coup.actionStack).toHaveLength(0)
+    })
+})
+
+describe('When getting available actions', () => {
+    it('lists all actions with 9 coins', () => {
+        const expectedPlayers = {
+            id1: {
+                name: "Bob"
+            },
+            id2: {
+                name: "Joe"
+            }
+        }
+        const coup = new Coup(expectedPlayers)
+        coup.players.id1.coins = 9
+        const actions = coup.getAvailableActions()
+        expect(actions.map(a => a.actionType).sort()).toEqual([ActionType.Coup, ActionType.Income, ActionType.ForeignAid, ActionType.Tax, ActionType.Steal, ActionType.Exchange, ActionType.Assassinate].sort())
+    })
+
+    it('onlys list actions current player can afford', () => {
+        const expectedPlayers = {
+            id1: {
+                name: "Bob"
+            },
+            id2: {
+                name: "Joe"
+            }
+        }
+        const coup = new Coup(expectedPlayers)
+        coup.players.id1.coins = 2
+        const actions = coup.getAvailableActions()
+        expect(actions.map(a => a.actionType).sort()).toEqual([ActionType.Income, ActionType.ForeignAid, ActionType.Tax, ActionType.Steal, ActionType.Exchange].sort())
+    })
+
+    it('onlys lists "coup" if player has >=10 coins', () => {
+        const expectedPlayers = {
+            id1: {
+                name: "Bob"
+            },
+            id2: {
+                name: "Joe"
+            }
+        }
+        const coup = new Coup(expectedPlayers)
+        coup.players.id1.coins = 10
+        const actions = coup.getAvailableActions()
+        expect(actions.map(a => a.actionType)).toEqual([ActionType.Coup])
+    })
+})
+
+describe('When ending turn', () => {
+    it('goes to next player', () => {
+        const expectedPlayers = {
+            id1: {
+                name: "Bob"
+            },
+            id2: {
+                name: "Joe"
+            },
+            id3: {
+                name: "Billy"
+            }
+        }
+        const coup = new Coup(expectedPlayers)
+        coup.endTurn()
+        expect(coup.currentTurn).toEqual(1)
+        coup.endTurn()
+        expect(coup.currentTurn).toEqual(2)
+        coup.endTurn()
+        expect(coup.currentTurn).toEqual(0)
+    })
+
+    it('skips players that are out of game', () => {
+        const expectedPlayers = {
+            id1: {
+                name: "Bob"
+            },
+            id2: {
+                name: "Joe"
+            },
+            id3: {
+                name: "Billy"
+            }
+        }
+        const coup = new Coup(expectedPlayers)
+        coup.players.id3.outOfGame = true   // id3 is out of the game
+        coup.endTurn()
+        expect(coup.currentTurn).toEqual(1)
+        coup.endTurn()
+        expect(coup.currentTurn).toEqual(0)
+    })
+
+    it('ends the game if there is a winner', () => {
+        const expectedPlayers = {
+            id1: {
+                name: "Bob"
+            },
+            id2: {
+                name: "Joe"
+            },
+            id3: {
+                name: "Billy"
+            }
+        }
+        const coup = new Coup(expectedPlayers)
+        coup.players.id1.outOfGame = true   // id1 is out of the game
+        coup.players.id3.outOfGame = true   // id3 is out of the game
+        expect(coup.gameOver).toEqual(false)
+        coup.endTurn()
+        expect(coup.gameOver).toEqual(true)
     })
 })
 
@@ -303,7 +414,7 @@ describe('When performing action: Foreign Aid', () => {
         coup.players.id2.hand.cards[0] = Character.Assassin
         coup.players.id2.hand.cards[1] = Character.Assassin
         coup.addAction(ActionType.Block, 'id2', 'id1', Character.Duke);         // id2: Block Foreign Aid (Bluff)
-        expect(coup.actionStack[coup.actionStack.length-1].bluff).toEqual(true)
+        expect(coup.actionStack[coup.actionStack.length - 1].bluff).toEqual(true)
 
         const response = coup.addAction(ActionType.Challenge, 'id1', 'id2');    // id1: Challenge Block
 
@@ -337,7 +448,7 @@ describe('When performing action: Foreign Aid', () => {
         coup.addAction(ActionType.ForeignAid, 'id1');                           // id1: Foreign Aid
         coup.players.id2.hand.cards[0] = Character.Duke
         coup.addAction(ActionType.Block, 'id2', 'id1', Character.Duke);         // id2: Block Foreign Aid (Truth)
-        expect(coup.actionStack[coup.actionStack.length-1].bluff).toEqual(false)
+        expect(coup.actionStack[coup.actionStack.length - 1].bluff).toEqual(false)
         const response = coup.addAction(ActionType.Challenge, 'id1', 'id2');    // id1: Challenge Block
 
         expect(response.canChallenge).toEqual(false)
@@ -395,7 +506,7 @@ describe('When performing action: Tax', () => {
         coup.players.id1.hand.cards[0] = Character.Assassin
         coup.players.id1.hand.cards[1] = Character.Assassin
         let response = coup.addAction(ActionType.Tax, 'id1');
-        expect(coup.actionStack[coup.actionStack.length-1].bluff).toEqual(true)
+        expect(coup.actionStack[coup.actionStack.length - 1].bluff).toEqual(true)
         expect(response.canChallenge).toEqual(true)
         expect(response.charactersThatCanBlock).toEqual([])
         expect(response.playersThatCanBlock).toEqual([])
@@ -426,7 +537,7 @@ describe('When performing action: Tax', () => {
         const coup = new Coup(expectedPlayers)
         coup.players.id1.hand.cards[0] = Character.Duke
         let response = coup.addAction(ActionType.Tax, 'id1', 'id1', Character.Duke);
-        expect(coup.actionStack[coup.actionStack.length-1].bluff).toEqual(false)
+        expect(coup.actionStack[coup.actionStack.length - 1].bluff).toEqual(false)
         expect(response.canChallenge).toEqual(true)
         expect(response.charactersThatCanBlock).toEqual([])
         expect(response.playersThatCanBlock).toEqual([])
@@ -581,7 +692,7 @@ describe('When performing action: Assassinate', () => {
         coup.players.id1.coins = 7
         coup.players.id1.hand.cards[0] = Character.Assassin
         const response = coup.addAction(ActionType.Assassinate, 'id1', 'id2', Character.Assassin);
-        expect(coup.actionStack[coup.actionStack.length-1].bluff).toEqual(false)
+        expect(coup.actionStack[coup.actionStack.length - 1].bluff).toEqual(false)
         expect(response.canChallenge).toEqual(true)
         expect(response.charactersThatCanBlock).toEqual([Character.Contessa])
         expect(response.playersThatCanBlock).toEqual(['id2'])
@@ -606,7 +717,7 @@ describe('When performing action: Assassinate', () => {
         coup.players.id1.hand.cards[0] = Character.Duke
         coup.players.id1.hand.cards[1] = Character.Duke
         coup.addAction(ActionType.Assassinate, 'id1', 'id2', Character.Assassin);
-        expect(coup.actionStack[coup.actionStack.length-1].bluff).toEqual(true)
+        expect(coup.actionStack[coup.actionStack.length - 1].bluff).toEqual(true)
     })
 })
 
@@ -623,12 +734,12 @@ describe('When performing action: Exchange', () => {
         const coup = new Coup(expectedPlayers)
         coup.players.id1.hand.cards[0] = Character.Ambassador
         const response = coup.addAction(ActionType.Exchange, 'id1', 'id1', Character.Ambassador);
-        expect(coup.actionStack[coup.actionStack.length-1].bluff).toEqual(false)
+        expect(coup.actionStack[coup.actionStack.length - 1].bluff).toEqual(false)
         expect(response.canChallenge).toEqual(true)
         expect(response.charactersThatCanBlock).toHaveLength(0)
         expect(response.playersThatCanBlock).toHaveLength(0)
         const actionResolution = coup.resolveAction()
-        
+
         expect(actionResolution.playerToLoseInfluence).toEqual(null)
         expect(actionResolution.playerToExchange).toEqual(null)
         expect(actionResolution.characterToExchange).toEqual(null)
@@ -649,7 +760,7 @@ describe('When performing action: Exchange', () => {
         coup.players.id1.hand.cards[0] = Character.Duke
         coup.players.id1.hand.cards[1] = Character.Duke
         coup.addAction(ActionType.Exchange, 'id1', 'id2', Character.Ambassador);
-        expect(coup.actionStack[coup.actionStack.length-1].bluff).toEqual(true)
+        expect(coup.actionStack[coup.actionStack.length - 1].bluff).toEqual(true)
     })
 })
 

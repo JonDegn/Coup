@@ -1,25 +1,25 @@
-import { Player } from '../rooms/lobby'
+import { Player } from '../rooms/ingame'
 import { Schema, MapSchema, type } from "@colyseus/schema";
 
 
 export enum Character {
-    Assassin,
-    Duke,
-    Contessa,
-    Captain,
-    Ambassador
+    Assassin = "Assassin",
+    Duke = "Duke",
+    Contessa = "Contessa",
+    Captain = "Captain",
+    Ambassador = "Ambassador"
 }
 
 export enum ActionType {
-    Coup,
-    Income,
-    ForeignAid,
-    Tax,
-    Steal,
-    Exchange,
-    Assassinate,
-    Block,
-    Challenge
+    Coup = 'coup',
+    Income = 'income',
+    ForeignAid = 'foreignAid',
+    Tax = 'tax',
+    Steal = 'steal',
+    Exchange = 'exchange',
+    Assassinate = 'assassinate',
+    Block = 'block',
+    Challenge = 'challenge'
 }
 
 export class Action {
@@ -95,6 +95,7 @@ export class PlayerData {
         this.hand.lostInfluence.push(false)
     }
 
+    // remove card from hand
     removeFromHand(character: Character) {
         if (!this.hand.contains(character)) {
             console.error(`${this.name} tried to remove ${character}, but doesn't have it in their hand!`)
@@ -112,6 +113,7 @@ export class PlayerData {
         this.hand.cards.splice(idxToRemove, 1)
     }
 
+    // Flip card up
     loseInfluence(character: Character) {
         if (!this.hand.contains(character)) {
             console.error(`${this.name} tried to remove ${character}, but doesn't have it in their hand!`)
@@ -125,7 +127,7 @@ export class PlayerData {
             }
         }
         this.hand.lostInfluence[idxToLose] = true;
-        if(this.hand.lostInfluence[0] && this.hand.lostInfluence[1]) {
+        if (this.hand.lostInfluence[0] && this.hand.lostInfluence[1]) {
             this.outOfGame = true
         }
     }
@@ -170,6 +172,7 @@ export class Coup {
     currentTurn: number = 0
     turnOrder: string[] = []
     actionStack: Action[] = []
+    gameOver: boolean = false
 
     constructor(players) {
         const playerIds = Object.keys(players)
@@ -185,6 +188,33 @@ export class Coup {
             const hand = new Hand(this.deck.drawCard(), this.deck.drawCard())
             this.players[pId] = new PlayerData(pId, p.name, hand)
         })
+    }
+
+    endTurn() {
+        do {
+            this.currentTurn = (this.currentTurn + 1) % this.turnOrder.length
+        } while (this.players[this.turnOrder[this.currentTurn]].outOfGame)
+        this.gameOver = Object.keys(this.players).filter(pId => !this.players[pId].outOfGame).length === 1
+    }
+
+    getAvailableActions(): any[] {
+        let actions = [
+            { actionType: ActionType.Income, label: 'Income (+1)', targetsPlayer: false },
+            { actionType: ActionType.ForeignAid, label: 'Foreign Aid (+2)', targetsPlayer: false },
+            { actionType: ActionType.Tax, label: 'Tax (+3)', targetsPlayer: false },
+            { actionType: ActionType.Steal, label: 'Steal (+2)', targetsPlayer: true },
+            { actionType: ActionType.Exchange, label: 'Exchange', targetsPlayer: false  }
+        ]
+        if (this.currentPlayer().coins >= 10) {
+            return [{ actionType: ActionType.Coup, label: 'Coup (-7)', targetsPlayer: true  }]
+        }
+        if (this.currentPlayer().coins >= 7) {
+            actions.push({ actionType: ActionType.Coup, label: 'Coup (-7)', targetsPlayer: true  })
+        }
+        if (this.currentPlayer().coins >= 3) {
+            actions.push({ actionType: ActionType.Assassinate, label: 'Assassinate (-3)', targetsPlayer: true  })
+        }
+        return actions
     }
 
     currentPlayer(): PlayerData {
@@ -218,7 +248,7 @@ export class Coup {
                 this.currentPlayer().coins += 2
                 return new ActionResolution()
             }))
-            return new ActionResponse(this.playersStillPlaying().filter(pId => pId != this.currentPlayer().id), [Character.Duke], false) 
+            return new ActionResponse(this.playersStillPlaying().filter(pId => pId != this.currentPlayer().id), [Character.Duke], false)
         } else if (action === ActionType.Block) {
             this.actionStack.push(new Action(action, sourcePlayerId, targetPlayerId, () => {
                 console.log(`${this.players[sourcePlayerId].name} blocked ${this.currentPlayer().name}`)
@@ -265,8 +295,10 @@ export class Coup {
                 return { playerToLoseInfluence: null, playerToExchange: null, characterToExchange: null, cardsToReturn: 2 }
             }, asCharacter, !this.playerHandContains(sourcePlayerId, Character.Ambassador)))
             return new ActionResponse([], [], true)
+        } else {
+            console.error(`${action} is not an action`)
+            return new ActionResponse([], [], false)
         }
-        return new ActionResponse([], [], false)
     }
 
     resolveAction(): ActionResolution {
