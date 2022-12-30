@@ -10,7 +10,7 @@
   "dependencies": {
     "@colyseus/monitor": "^0.12.1",
     "@types/jest": "^25.1.4",
-    "colyseus": "^0.12.0",
+    "colyseus": "^0.14.24",
     "cookie-parser": "~1.4.4",
     "express": "~4.16.1",
     "jest": "^25.2.3",
